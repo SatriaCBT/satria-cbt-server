@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"encoding/base64"
-	"os"
 	"regexp"
 	"satriacbtserver/configs"
 	"satriacbtserver/models"
@@ -14,15 +13,15 @@ import (
 	"gorm.io/gorm"
 )
 
-type AdminController struct {}
 
-func NewAdminController() *AdminController {
-	return &AdminController{}
+type TeacherController struct {}
+
+func NewTeacherController() *TeacherController {
+	return &TeacherController{}
 }
 
-
-func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
-	var req models.Admins
+func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
+	var req models.Teachers
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
 			Code: fiber.StatusBadRequest,
@@ -37,11 +36,11 @@ func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	hashletter := regexp.MustCompile(`[A-Za-z]`).MatchString(req.Password)
-	hashdigits := regexp.MustCompile(`\d`).MatchString(req.Password)
-	hashSpecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(req.Password)
+	hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(req.Password)
+	hashnumber := regexp.MustCompile(`\d`).MatchString(req.Password)
+	hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(req.Password)
 
-	if !hashletter || !hashdigits || !hashSpecial {
+	if !hashletter || !hashnumber || !hashspecial {
 		return &fiber.Error{
 			Code: fiber.StatusBadRequest,
 			Message: "Password must contain at least one letter, one number, and one special character",
@@ -49,22 +48,23 @@ func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 	}
 
 	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
-	admin := models.Admins{
-		Name:     req.Name,
+	teacher := models.Teachers {
+		Name: req.Name,
 		Username: req.Username,
-		Email:    req.Email,
-		Password: encode,
+		Email: req.Email,
+		Password: string(encode),
+		Classes: req.Classes,
+		CreatedClasses: req.CreatedClasses,
 		CreatedAt: time.Now(),
 	}
 
 	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&admin).Error; err != nil {
+		if err := tx.Create(&teacher).Error; err != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,
 				Message: err.Error(),
 			}
 		}
-
 		return nil
 	})
 
@@ -76,31 +76,31 @@ func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 	}
 
 	response := res.AdminResponse{
-		ID:        admin.ID,
-		Name:      admin.Name,
-		Username:  admin.Username,
-		Email:     admin.Email,
-		CreatedAt: admin.CreatedAt,
+		ID: teacher.ID,
+		Name: teacher.Name,
+		Username: teacher.Username,
+		Email: teacher.Email,
+		CreatedAt: teacher.CreatedAt,
 	}
 
-	if !admin.UpdatedAt.IsZero() {
-		response.UpdatedAt = &admin.UpdatedAt
+	if !teacher.UpdatedAt.IsZero() {
+		response.UpdatedAt = &teacher.UpdatedAt
 	}
 
 	return c.JSON(res.ResponseCode{
 		Code: fiber.StatusOK,
-		Message: "Admin created successfully",
+		Message: "Teacher registered successfully",
 		Data: response,
 	})
+	
 }
 
 
-func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
-	var req models.AdminsRequest
-	var tokenSecret = os.Getenv("ADMIN_TOKEN")
+func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
+	var req models.TeachersRequest
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.ErrBadRequest.Code,
+			Code: fiber.StatusBadRequest,
 			Message: err.Error(),
 		}
 	}
@@ -108,13 +108,13 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
 	password := string(encode)
 
-	var admin models.Admins
+	var teacher models.Teachers
 	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ? AND password = ?", admin.Email, password).First(&admin)
-			return &fiber.Error{
-				Code: fiber.ErrUnauthorized.Code,
-				Message: result.Error.Error(),
-			}
+		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&teacher)
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: result.Error.Error(),
+		}
 	})
 
 	if err != nil {
@@ -130,43 +130,44 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 		})
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"id": admin.ID,
-		"email": admin.Email,
-		"exp": jwt.TimeFunc().Add(time.Hour * 24).Unix(),
+	token :=  jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+		"id": teacher.ID,
+		"email": teacher.Email,
+		"exp": time.Now().Add(time.Hour * 24).Unix(),
 	})
 
-	tokenString, err := token.SignedString([]byte(tokenSecret))
+	tokenString, err :=  token.SignedString([]byte("secret"))
+
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(res.ResponseCode{
-			Code:  fiber.StatusInternalServerError,
-			Message: "Failed to login user",
-		})
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
-	response := res.AdminLoginResponse{
-		ID:        admin.ID,
-		Name:      admin.Name,
-		Username:  admin.Username,
-		Email:     admin.Email,
-		CreatedAt: admin.CreatedAt,
-		Token:     tokenString,
+	response := res.TeacherLoginResponse{
+		ID: teacher.ID,
+		Name: teacher.Name,
+		Username: teacher.Username,
+		Email: teacher.Email,
+		CreatedAt: teacher.CreatedAt,
+		Token: tokenString,
 	}
 
-	if !admin.UpdatedAt.IsZero() {
-		response.UpdatedAt = &admin.UpdatedAt
+	if !teacher.UpdatedAt.IsZero() {
+		response.UpdatedAt = &teacher.UpdatedAt
 	}
 
 	return c.JSON(res.ResponseCode{
 		Code: fiber.StatusOK,
-		Message: "Admin logged in successfully",
+		Message: "Teacher logged in successfully",
 		Data: response,
 	})
 }
 
 
-func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
-	var response models.Admins
+func (t *TeacherController) GetSessionProfileTeacher(c *fiber.Ctx) error {
+	var response models.Teachers
 	userID, ok := c.Locals("userID").(uint)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
@@ -190,11 +191,13 @@ func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	data := res.AdminResponse{
+	data := res.TeacherResponse{
 		ID:        response.ID,
 		Name:      response.Name,
 		Username:  response.Username,
 		Email:     response.Email,
+		Classes:   response.Classes,
+		CreatedClasses: response.CreatedClasses,
 		CreatedAt: response.CreatedAt,
 	}
 
@@ -211,7 +214,7 @@ func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
 }
 
 
-func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
+func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 	var req map[string]interface{}
 	var id = c.Params("id")
 
@@ -227,6 +230,8 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 		"username": true,
 		"password": true,
 		"email": true,
+		"classes": true,
+		"createdClasses": true,
 	}
 
 	for key := range req {
@@ -235,9 +240,9 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	var admin models.Admins
+	var teacher models.Teachers
 	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).First(&admin)
+		result := tx.Where("id = ?", id).First(&teacher)
 		return &fiber.Error{
 			Code: fiber.ErrUnauthorized.Code,
 			Message: result.Error.Error(),
@@ -252,25 +257,50 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 	}
 
 	if name, ok := req["name"].(string); ok && name != "" {
-		admin.Name = name
+		teacher.Name = name
 	}
 
 	if username, ok := req["username"].(string); ok && username != "" {
-		admin.Username = username
+		teacher.Username = username
 	}
 
 	if password, ok :=  req["password"].(string); ok && password != "" {
-		admin.Password =  password
+		teacher.Password =  password
 	}
 
 
 	if email, ok := req["email"].(string); ok && email != "" {
-		admin.Email = email
+		teacher.Email = email
 	}
+
+	if classes, ok := req["classes"].([]interface{}); ok && len(classes) > 0 {
+		var parsedClasses []models.Class
+		for _, c := range classes {
+			if classMap, isMap := c.(map[string]interface{}); isMap {
+				if id, exists := classMap["id"]; exists {
+					parsedClasses = append(parsedClasses, models.Class{ID: id.(uint)})
+				}
+			}
+		}
+		teacher.Classes = parsedClasses
+	}
+	
+	if createdClasses, ok := req["createdClasses"].([]interface{}); ok && len(createdClasses) > 0 {
+		var parsedCreatedClasses []models.Class
+		for _, c := range createdClasses {
+			if classMap, isMap := c.(map[string]interface{}); isMap {
+				if id, exists := classMap["id"]; exists {
+					parsedCreatedClasses = append(parsedCreatedClasses, models.Class{ID: id.(uint)})
+				}
+			}
+		}
+		teacher.CreatedClasses = parsedCreatedClasses
+	}
+	
 
 
 	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Save(&admin)
+		result := tx.Save(&teacher)
 		return &fiber.Error{
 			Code: fiber.StatusInternalServerError,
 			Message: result.Error.Error(),
@@ -284,28 +314,30 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	response := res.AdminResponse{
-		ID:        admin.ID,
-		Name:      admin.Name,
-		Username:  admin.Username,
-		Email:     admin.Email,
-		CreatedAt: admin.CreatedAt,
+	response := res.TeacherResponse{
+		ID:        teacher.ID,
+		Name:      teacher.Name,
+		Username:  teacher.Username,
+		Email:     teacher.Email,
+		Classes:   teacher.Classes,
+		CreatedClasses: teacher.CreatedClasses,
+		CreatedAt: teacher.CreatedAt,
 	}
 
-	if !admin.UpdatedAt.IsZero() {
-		response.UpdatedAt = &admin.UpdatedAt
+	if !teacher.UpdatedAt.IsZero() {
+		response.UpdatedAt = &teacher.UpdatedAt
 	}
 
 	return c.JSON(res.ResponseCode{
 		Code: fiber.StatusOK,
-		Message: "Admin updated successfully",
+		Message: "Teacher updated successfully",
 		Data: response,
 	})
 
 }
 
 
-func (a *AdminController) DeleteAdmin(c *fiber.Ctx) error {
+func (t *TeacherController) DeleteTeacher(c *fiber.Ctx) error {
 	userID, ok := c.Locals("userID").(uint)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
@@ -315,24 +347,9 @@ func (a *AdminController) DeleteAdmin(c *fiber.Ctx) error {
 	}
 
 	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		var totalAdmins int64
-		var admin models.Admins
+		var teacher models.Teachers
 
-		if err := tx.Model(&models.Admins{}).Count(&totalAdmins).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		if totalAdmins <= 1 {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Cannot delete the last admin",
-			}
-		}
-
-		result := tx.Where("id = ?", userID).First(&admin)
+		result := tx.Where("id = ?", userID).First(&teacher)
 		if result.Error != nil {
 			return &fiber.Error{
 				Code: fiber.StatusNotFound,
@@ -340,7 +357,7 @@ func (a *AdminController) DeleteAdmin(c *fiber.Ctx) error {
 			}
 		}
 
-		if err := tx.Delete(&admin).Error; err != nil {
+		if err := tx.Delete(&teacher).Error; err != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,
 				Message: err.Error(),
@@ -360,7 +377,7 @@ func (a *AdminController) DeleteAdmin(c *fiber.Ctx) error {
 
 	return c.JSON(res.ResponseCode{
 		Code: fiber.StatusOK,
-		Message: "Admin deleted successfully",
+		Message: "Teacher deleted successfully",
 	})
 
 }

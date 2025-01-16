@@ -12,7 +12,7 @@ type AdminResponse struct {
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 type AdminLoginResponse struct {
@@ -21,7 +21,7 @@ type AdminLoginResponse struct {
     Username  string    `json:"username"`
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
-    UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
     Token     string    `json:"token"`
 }
 
@@ -32,9 +32,19 @@ type TeacherResponse struct {
     Username      string    `json:"username"`
     Email         string    `json:"email"`
     CreatedAt     time.Time `json:"createdAt"`
-    UpdatedAt     time.Time `json:"updatedAt"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
     Classes       []models.Class   `json:"classes"`  
     CreatedClasses []models.Class  `json:"createdClasses"`
+}
+
+type TeacherLoginResponse struct {
+    ID        uint    `json:"id"`
+    Name      string    `json:"name"`
+    Username  string    `json:"username"`
+    Email     string    `json:"email"`
+    CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+    Token     string    `json:"token"`
 }
 
 type StudentResponse struct {
@@ -43,8 +53,18 @@ type StudentResponse struct {
     Username  string    `json:"username"`
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
-    UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
     Classes   []models.Class   `json:"classes"`  
+}
+
+type StudentLoginResponse struct {
+    ID        uint    `json:"id"`
+    Name      string    `json:"name"`
+    Username  string    `json:"username"`
+    Email     string    `json:"email"`
+    CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+    Token     string    `json:"token"`
 }
 
 

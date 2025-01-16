@@ -17,6 +17,11 @@ type Students struct {
 	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
+type StudentsRequest struct {
+	Email string `gorm:"email" json:"email"`
+	Password string `gorm:"password" json:"password"`
+}
+
 func (s *Students) TableName() string {
 	return "students"
 }

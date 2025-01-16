@@ -6,7 +6,8 @@ import (
 	"satriacbtserver/configs"
 	"satriacbtserver/models"
 	"time"
-
+	"satriacbtserver/controllers"
+	"satriacbtserver/routers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
 )
@@ -32,6 +33,13 @@ func main() {
 	models.MigrationStudents(database)
 	models.MigrationTeachers(database)
 	models.MigrationClass(database)
+
+	adminController := controllers.NewAdminController()
+	studentController := controllers.NewStudentController()
+	teacherController := controllers.NewTeacherController()
+	routers.NewRoutesAdmins(app, adminController)
+	routers.NewRoutesStudents(app, studentController)
+	routers.NewRoutesTeachers(app, teacherController)
 	app.Listen(":3000")
 	fmt.Println("Server running on port 3000")
 }
