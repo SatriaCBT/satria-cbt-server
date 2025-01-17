@@ -144,6 +144,7 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    student.ID,
 		"email": student.Email,
+		"role":  "student",
 		"exp":   time.Now().Add(24 * time.Hour).Unix(),
 	})
 

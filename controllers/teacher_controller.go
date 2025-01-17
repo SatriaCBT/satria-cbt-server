@@ -145,6 +145,7 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    teacher.ID,
 		"email": teacher.Email,
+		"role" : "teacher",
 		"exp":   time.Now().Add(24 * time.Hour).Unix(),
 	})
 

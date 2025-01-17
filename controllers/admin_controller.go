@@ -164,6 +164,7 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    admin.ID,
 		"email": admin.Email,
+		"role":  "admin",
 		"exp":   time.Now().Add(24 * time.Hour).Unix(),
 	})
 
