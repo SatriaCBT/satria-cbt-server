@@ -12,6 +12,7 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -63,16 +64,22 @@ func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
+	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
 	admin := models.Admins{
 		Name:     req.Name,
 		Username: req.Username,
 		Email:    req.Email,
-		Password: encode,
+		Password: string(encode),
 		CreatedAt: time.Now(),
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+	err = configs.Database().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&admin).Error; err != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,
@@ -133,11 +140,17 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	encodedPassword := base64.StdEncoding.EncodeToString([]byte(req.Password))
+	encodedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
 	password := string(encodedPassword)
 
 	var admin models.Admins
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+	err = configs.Database().Transaction(func(tx *gorm.DB) error {
 		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&admin)
 		if result.Error != nil {
 			if result.Error == gorm.ErrRecordNotFound {

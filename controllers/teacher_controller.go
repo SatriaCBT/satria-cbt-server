@@ -11,6 +11,7 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -55,7 +56,13 @@ func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
 		}
 	}
 
-	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
+	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
 	teacher := models.Teachers {
 		Name: req.Name,
 		Username: req.Username,
@@ -66,7 +73,7 @@ func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
 		CreatedAt: time.Now(),
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+	err = configs.Database().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&teacher).Error; err != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,

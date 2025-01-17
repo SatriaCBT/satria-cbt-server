@@ -11,6 +11,7 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -55,7 +56,13 @@ func (s *StudentController) RegisterStudent(c *fiber.Ctx) error {
 		}
 	}
 
-	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
+	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
 	student := models.Students{
 		Name: req.Name,
 		Username: req.Username,
@@ -65,7 +72,7 @@ func (s *StudentController) RegisterStudent(c *fiber.Ctx) error {
 		CreatedAt: time.Now(),
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+	err = configs.Database().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&student).Error; err != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,
@@ -113,11 +120,17 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 		}
 	}
 
-	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
+	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return &fiber.Error{
+			Code: fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
 	password := string(encode)
 
 	var student models.Students
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+	err = configs.Database().Transaction(func(tx *gorm.DB) error {
 		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&student)
 		if result.Error != nil {
 			return &fiber.Error{
