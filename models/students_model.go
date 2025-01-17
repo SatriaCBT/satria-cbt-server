@@ -14,7 +14,6 @@ type Students struct {
 	Password  string    `gorm:"not null" json:"password"`
 	CreatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"createdAt"`
 	Classes   []Class   `gorm:"many2many:class_students;" json:"classes"`
-	UpdatedAt time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 type StudentsRequest struct {

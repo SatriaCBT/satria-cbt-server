@@ -6,7 +6,7 @@ import (
 )
 
 func NewRoutesTeachers(router fiber.Router, teachercontroller *controllers.TeacherController,) {
-	app := router.Group("/student")
+	app := router.Group("/teacher")
 	app.Post("/register", teachercontroller.RegisterTeacher)
 	app.Post("/login", teachercontroller.LoginTeacher)
 	app.Get("/profile", teachercontroller.GetSessionProfileTeacher)

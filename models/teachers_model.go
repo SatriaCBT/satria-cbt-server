@@ -15,7 +15,6 @@ type Teachers struct {
 	CreatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"createdAt"`
 	Classes       []Class   `gorm:"many2many:class_teachers;" json:"classes"`
 	CreatedClasses []Class  `gorm:"foreignkey:CreatedByID" json:"createdClasses"`
-	UpdatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 type TeachersRequest struct {

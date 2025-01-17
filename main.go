@@ -28,11 +28,11 @@ func main() {
 		},
 	)
 	database := configs.Database()
-	configs.InitAdminDefault(database)
 	models.MigrationAdmin(database)
 	models.MigrationStudents(database)
 	models.MigrationTeachers(database)
 	models.MigrationClass(database)
+	configs.InitAdminDefault(database)
 
 	adminController := controllers.NewAdminController()
 	studentController := controllers.NewStudentController()
