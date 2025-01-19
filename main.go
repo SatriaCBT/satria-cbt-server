@@ -37,6 +37,9 @@ func main() {
 	adminController := controllers.NewAdminController()
 	studentController := controllers.NewStudentController()
 	teacherController := controllers.NewTeacherController()
+	classController := controllers.NewClassController(studentController, teacherController)
+
+	routers.NewRoutesClass(app, classController)
 	routers.NewRoutesAdmins(app, adminController)
 	routers.NewRoutesStudents(app, studentController)
 	routers.NewRoutesTeachers(app, teacherController)

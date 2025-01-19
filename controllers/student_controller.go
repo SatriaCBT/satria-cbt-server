@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"encoding/base64"
 	"os"
 	"regexp"
 	"satriacbtserver/configs"
@@ -89,13 +88,22 @@ func (s *StudentController) RegisterStudent(c *fiber.Ctx) error {
 		}
 	}
 
+	classSummaries := make([]res.ClassSummaryResponse, len(student.Classes))
+	for i, class := range student.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
+	}
+
 	response := res.StudentResponse{
-		ID: student.ID,
-		Name: student.Name,
-		Username: student.Username,
-		Email: student.Email,
-		Classes: student.Classes,
+		ID:        student.ID,
+		Name:      student.Name,
+		Username:  student.Username,
+		Email:     student.Email,
 		CreatedAt: student.CreatedAt,
+		Classes:   classSummaries,
 	}
 
 	if student.UpdatedAt.IsZero() {
@@ -120,18 +128,10 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 		}
 	}
 
-	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
-			Message: err.Error(),
-		}
-	}
-	password := string(encode)
 
 	var student models.Students
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&student)
+	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("email = ?", req.Email).Preload("Classes").First(&student)
 		if result.Error != nil {
 			return &fiber.Error{
 				Code: fiber.StatusNotFound,
@@ -142,16 +142,17 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
-				Code:  fiber.StatusUnauthorized,
-				Message: "Invalid username or password",
-			})
+		return &fiber.Error{
+			Code: fiber.StatusNotFound,
+			Message: err.Error(),
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(res.ResponseCode{
-			Code:  fiber.StatusInternalServerError,
-			Message: "Failed to login user",
-		})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(student.Password), []byte(req.Password)); err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusUnauthorized,
+			Message: "Invalid password",
+		}
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -170,17 +171,28 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 		})
 	}
 
-	response := res.StudentLoginResponse{
-		ID: student.ID,
-		Name: student.Name,
-		Username: student.Username,
-		Email: student.Email,
-		CreatedAt: student.CreatedAt,
-		Token: tokenString,
+	classSummaries := make([]res.ClassSummaryResponse, len(student.Classes))
+	for i, class := range student.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
 	}
 
-	if !student.UpdatedAt.IsZero() {
-		response.UpdatedAt = &student.UpdatedAt
+	response := res.StudentLoginResponse{
+		ID:        student.ID,
+		Name:      student.Name,
+		Username:  student.Username,
+		Email:     student.Email,
+		CreatedAt: student.CreatedAt,
+		Classes:   classSummaries, 
+		Token:     tokenString,
+	}
+
+
+	if student.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -219,17 +231,27 @@ func (s *StudentController) GetSessionProfileStudent(c *fiber.Ctx) error {
 		}
 	}
 
-	data := res.StudentResponse{
-		ID: response.ID,
-		Name: response.Name,
-		Username: response.Username,
-		Email: response.Email,
-		Classes: response.Classes,
-		CreatedAt: response.CreatedAt,
+	classSummaries := make([]res.ClassSummaryResponse, len(response.Classes))
+	for i, class := range response.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
 	}
 
-	if !response.UpdatedAt.IsZero() {
-		data.UpdatedAt = &response.UpdatedAt
+	data := res.StudentResponse{
+		ID:        response.ID,
+		Name:      response.Name,
+		Username:  response.Username,
+		Email:     response.Email,
+		CreatedAt: response.CreatedAt,
+		Classes:   classSummaries,
+	}
+
+
+	if response.UpdatedAt.IsZero() {
+		data.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -294,7 +316,32 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 	}
 
 	if password, ok :=  req["password"].(string); ok && password != "" {
-		student.Password =  base64.StdEncoding.EncodeToString([]byte(password))
+		if len(password) <= 5 || len(password) >= 12 {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must be between 5 and 12 characters",
+			}
+		}
+
+		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
+		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
+		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
+
+		if !hashletter || !hashnumber || !hashspecial {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must contain at least one letter, one number, and one special character",
+			}
+		}
+
+		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return &fiber.Error{
+				Code: fiber.StatusInternalServerError,
+				Message: err.Error(),
+			}
+		}
+		student.Password = string(encode)
 	}
 
 
@@ -342,13 +389,22 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 		}
 	}
 
+	classSummaries := make([]res.ClassSummaryResponse, len(student.Classes))
+	for i, class := range student.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
+	}
+
 	response := res.StudentResponse{
-		ID: student.ID,
-		Name: student.Name,
-		Username: student.Username,
-		Email: student.Email,
-		Classes: student.Classes,
+		ID:        student.ID,
+		Name:      student.Name,
+		Username:  student.Username,
+		Email:     student.Email,
 		CreatedAt: student.CreatedAt,
+		Classes:   classSummaries,
 	}
 
 	if updatedAt, ok := req["updated_at"].(time.Time); ok {

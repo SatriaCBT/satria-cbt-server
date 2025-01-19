@@ -14,9 +14,8 @@ type Class struct {
 	Code        string    `gorm:"unique;not null" json:"code"`
 	Teachers    []Teachers `gorm:"many2many:class_teachers;" json:"teachers"`
 	Students    []Students `gorm:"many2many:class_students;" json:"students"`
-	CreatedBy   Teachers  `gorm:"foreignkey:CreatedByID" json:"createdBy"`
+	CreatedBy   Admins    `gorm:"foreignKey:CreatedByID" json:"createdBy,omitempty"`
 	CreatedAt   time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt   time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	CreatedByID uint      `json:"createdByID"`
 }
 

@@ -21,6 +21,7 @@ type StudentsRequest struct {
 	Password string `gorm:"password" json:"password"`
 }
 
+
 func (s *Students) TableName() string {
 	return "students"
 }

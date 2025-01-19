@@ -14,7 +14,7 @@ type Teachers struct {
 	Password      string    `gorm:"not null" json:"password"`
 	CreatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"createdAt"`
 	Classes       []Class   `gorm:"many2many:class_teachers;" json:"classes"`
-	CreatedClasses []Class  `gorm:"foreignkey:CreatedByID" json:"createdClasses"`
+	// CreatedClasses []Class  `gorm:"foreignKey:CreatedByID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"createdClasses"`
 }
 
 type TeachersRequest struct {

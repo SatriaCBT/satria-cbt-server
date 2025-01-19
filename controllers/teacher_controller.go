@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"encoding/base64"
 	"os"
 	"regexp"
 	"satriacbtserver/configs"
@@ -69,7 +68,6 @@ func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
 		Email: req.Email,
 		Password: string(encode),
 		Classes: req.Classes,
-		CreatedClasses: req.CreatedClasses,
 		CreatedAt: time.Now(),
 	}
 
@@ -120,12 +118,16 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 		}
 	}
 
-	encode := base64.StdEncoding.EncodeToString([]byte(req.Password))
-	password := string(encode)
+	if !isValidEmail(req.Email) {
+		return &fiber.Error{
+			Code: fiber.StatusBadRequest,
+			Message: "Invalid email format",
+		}
+	}
 
 	var teacher models.Teachers
 	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&teacher)
+		result := tx.Where("email = ?", req.Email).First(&teacher)
 		if result.Error != nil {
 			return &fiber.Error{
 				Code: fiber.StatusInternalServerError,
@@ -137,16 +139,17 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
-				Code:  fiber.StatusUnauthorized,
-				Message: "Invalid username or password",
-			})
+		return &fiber.Error{
+			Code: fiber.StatusNotFound,
+			Message: err.Error(),
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(res.ResponseCode{
-			Code:  fiber.StatusInternalServerError,
-			Message: "Failed to login user",
-		})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(teacher.Password), []byte(req.Password)); err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusUnauthorized,
+			Message: "Invalid password",
+		}
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -174,8 +177,8 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 		Token: tokenString,
 	}
 
-	if !teacher.UpdatedAt.IsZero() {
-		response.UpdatedAt = &teacher.UpdatedAt
+	if teacher.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -214,18 +217,26 @@ func (t *TeacherController) GetSessionProfileTeacher(c *fiber.Ctx) error {
 		}
 	}
 
+	classSummaries := make([]res.ClassSummaryResponse, len(response.Classes))
+	for i, class := range response.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
+	}
+
 	data := res.TeacherResponse{
 		ID:        response.ID,
 		Name:      response.Name,
 		Username:  response.Username,
 		Email:     response.Email,
-		Classes:   response.Classes,
-		CreatedClasses: response.CreatedClasses,
 		CreatedAt: response.CreatedAt,
+		Classes:   classSummaries,
 	}
 
-	if !response.UpdatedAt.IsZero() {
-		data.UpdatedAt = &response.UpdatedAt
+	if response.UpdatedAt.IsZero() {
+		data.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -292,7 +303,32 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 	}
 
 	if password, ok :=  req["password"].(string); ok && password != "" {
-		teacher.Password =  base64.StdEncoding.EncodeToString([]byte(password))
+		if len(password) <= 5 || len(password) >= 12 {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must be between 5 and 12 characters",
+			}
+		}
+		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
+		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
+		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
+
+		if !hashletter || !hashnumber || !hashspecial {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must contain at least one letter, one number, and one special character",
+			}
+		}
+
+		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return &fiber.Error{
+				Code: fiber.StatusInternalServerError,
+				Message: err.Error(),
+			}
+		}
+		 
+		teacher.Password =  string(encode)
 	}
 
 
@@ -317,18 +353,6 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 		}
 		teacher.Classes = parsedClasses
 	}
-	
-	if createdClasses, ok := req["createdClasses"].([]interface{}); ok && len(createdClasses) > 0 {
-		var parsedCreatedClasses []models.Class
-		for _, c := range createdClasses {
-			if classMap, isMap := c.(map[string]interface{}); isMap {
-				if id, exists := classMap["id"]; exists {
-					parsedCreatedClasses = append(parsedCreatedClasses, models.Class{ID: id.(uint)})
-				}
-			}
-		}
-		teacher.CreatedClasses = parsedCreatedClasses
-	}
 
 	req["updated_at"] = time.Now()
 
@@ -350,18 +374,26 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 		}
 	}
 
+	classSummaries := make([]res.ClassSummaryResponse, len(teacher.Classes))
+	for i, class := range teacher.Classes {
+		classSummaries[i] = res.ClassSummaryResponse{
+			ID:   class.ID,
+			Name: class.Name,
+			Code: class.Code,
+		}
+	}
+
 	response := res.TeacherResponse{
 		ID:        teacher.ID,
 		Name:      teacher.Name,
 		Username:  teacher.Username,
 		Email:     teacher.Email,
-		Classes:   teacher.Classes,
-		CreatedClasses: teacher.CreatedClasses,
 		CreatedAt: teacher.CreatedAt,
+		Classes:   classSummaries,
 	}
 
-	if !teacher.UpdatedAt.IsZero() {
-		response.UpdatedAt = &teacher.UpdatedAt
+	if teacher.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{

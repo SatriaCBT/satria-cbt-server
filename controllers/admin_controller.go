@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"encoding/base64"
 	_ "fmt"
 	"os"
 	"regexp"
@@ -140,38 +139,28 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 		}
 	}
 
-	encodedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
-			Message: err.Error(),
-		}
-	}
-	password := string(encodedPassword)
 
 	var admin models.Admins
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ? AND password = ?", req.Email, password).First(&admin)
+	err := configs.Database().Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("email = ?", req.Email).First(&admin)
 		if result.Error != nil {
-			if result.Error == gorm.ErrRecordNotFound {
-				return &fiber.Error{
-					Code:    fiber.StatusUnauthorized,
-					Message: "Invalid email or password",
-				}
-			}
 			return result.Error
 		}
 		return nil
 	})
 
 	if err != nil {
-		if fiberErr, ok := err.(*fiber.Error); ok {
-			return fiberErr
+		return &fiber.Error{
+			Code: fiber.StatusNotFound,
+			Message: err.Error(),
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(res.ResponseCode{
-			Code:    fiber.StatusInternalServerError,
-			Message: "Failed to login user",
-		})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password)); err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusUnauthorized,
+			Message: "Invalid password",
+		}
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -199,8 +188,8 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 		Token:     tokenString,
 	}
 
-	if !admin.UpdatedAt.IsZero() {
-		response.UpdatedAt = &admin.UpdatedAt
+	if admin.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -248,8 +237,8 @@ func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
 		CreatedAt: response.CreatedAt,
 	}
 
-	if !response.UpdatedAt.IsZero() {
-		data.UpdatedAt = &response.UpdatedAt
+	if response.UpdatedAt.IsZero() {
+		data.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
@@ -315,7 +304,33 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 	}
 
 	if password, ok :=  req["password"].(string); ok && password != "" {
-		admin.Password =  base64.StdEncoding.EncodeToString([]byte(password))
+		if len(password) <= 5 || len(password) >= 12 {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must be between 5 and 12 characters",
+			}
+		}
+
+		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
+		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
+		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
+
+		if !hashletter || !hashnumber || !hashspecial {
+			return &fiber.Error{
+				Code: fiber.StatusBadRequest,
+				Message: "Password must contain at least one letter, one number, and one special character",
+			}
+		}
+
+		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return &fiber.Error{
+				Code: fiber.StatusInternalServerError,
+				Message: err.Error(),
+			}
+		}
+
+		admin.Password =  string(encode)
 	}
 
 

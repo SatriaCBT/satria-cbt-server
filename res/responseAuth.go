@@ -2,9 +2,14 @@ package res
 
 import (
 	"time"
-	"satriacbtserver/models"
 
 )
+
+type ClassSummaryResponse struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+}
 
 type AdminResponse struct {
 	ID        uint    `json:"id"`
@@ -33,8 +38,7 @@ type TeacherResponse struct {
     Email         string    `json:"email"`
     CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
-    Classes       []models.Class   `json:"classes"`  
-    CreatedClasses []models.Class  `json:"createdClasses"`
+    Classes       []ClassSummaryResponse   `json:"classes"`  
 }
 
 type TeacherLoginResponse struct {
@@ -54,7 +58,7 @@ type StudentResponse struct {
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-    Classes   []models.Class   `json:"classes"`  
+    Classes   []ClassSummaryResponse  `json:"classes"`  
 }
 
 type StudentLoginResponse struct {
@@ -62,6 +66,7 @@ type StudentLoginResponse struct {
     Name      string    `json:"name"`
     Username  string    `json:"username"`
     Email     string    `json:"email"`
+    Classes []ClassSummaryResponse `json:"classes"`
     CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
     Token     string    `json:"token"`
@@ -69,12 +74,12 @@ type StudentLoginResponse struct {
 
 
 type ClassResponse struct {
-    ID          uint    `json:"id"`
-    Name        string    `json:"name"`
-    Code        string    `json:"code"`
-    Teachers    []models.Teachers`json:"teachers"`  
-    Students    []models.Students `json:"students"` 
-    CreatedBy   models.Teachers   `json:"createdBy"`
-    CreatedAt   time.Time `json:"createdAt"`
-    UpdatedAt   time.Time `json:"updatedAt"`
+    ID        uint              `json:"id"`
+    Name      string           `json:"name"`
+    Code      string           `json:"code"`
+    Teachers  []TeacherResponse `json:"teachers"`
+    Students  []StudentResponse `json:"students"`
+    CreatedBy AdminResponse   `json:"createdBy"`
+    CreatedAt time.Time        `json:"createdAt"`
+    UpdatedAt *time.Time       `json:"updatedAt,omitempty"`
 }
