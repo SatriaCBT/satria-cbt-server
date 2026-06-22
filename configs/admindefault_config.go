@@ -3,7 +3,7 @@ package configs
 import (
 	"log"
 	"math/rand"
-	"satriacbtserver/models"
+	"github.com/Satria-CBT/satria-cbt-server/models"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
