@@ -17,7 +17,7 @@ type AdminResponse struct {
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 }
 
 type AdminLoginResponse struct {
@@ -26,7 +26,7 @@ type AdminLoginResponse struct {
     Username  string    `json:"username"`
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
     Token     string    `json:"token"`
 }
 
@@ -47,7 +47,7 @@ type TeacherLoginResponse struct {
     Username  string    `json:"username"`
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
     Token     string    `json:"token"`
 }
 
@@ -57,7 +57,7 @@ type StudentResponse struct {
     Username  string    `json:"username"`
     Email     string    `json:"email"`
     CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
     Classes   []ClassSummaryResponse  `json:"classes"`  
 }
 
@@ -68,7 +68,7 @@ type StudentLoginResponse struct {
     Email     string    `json:"email"`
     Classes []ClassSummaryResponse `json:"classes"`
     CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
     Token     string    `json:"token"`
 }
 
