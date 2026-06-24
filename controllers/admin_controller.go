@@ -1,97 +1,117 @@
 package controllers
 
 import (
-	_ "fmt"
 	"os"
 	"regexp"
-	"satriacbtserver/configs"
-	"satriacbtserver/models"
-	"satriacbtserver/res"
+	"github.com/Satria-CBT/satria-cbt-server/models"
+	"github.com/Satria-CBT/satria-cbt-server/res"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-type AdminController struct {}
-
-func NewAdminController() *AdminController {
-	return &AdminController{}
+type AdminController struct {
+	db *gorm.DB
 }
 
+func NewAdminController(db *gorm.DB) *AdminController {
+	return &AdminController{db: db}
+}
 
 func isValidEmail(email string) bool {
-    re := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-    return re.MatchString(email)
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
 }
 
+func validatePassword(password string) error {
+	if len(password) <= 5 || len(password) >= 12 {
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: "Password must be between 5 and 12 characters",
+		}
+	}
 
+	hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
+	hashnumber := regexp.MustCompile(`\d`).MatchString(password)
+	hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
+
+	if !hashletter || !hashnumber || !hashspecial {
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: "Password must contain at least one letter, one number, and one special character",
+		}
+	}
+	return nil
+}
+
+func hashPassword(password string) (string, error) {
+	encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", &fiber.Error{
+			Code:    fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
+	return string(encode), nil
+}
+
+func getUserID(c *fiber.Ctx) (uint, error) {
+	claims, ok := c.Locals("userID").(jwt.MapClaims)
+	if !ok {
+		return 0, &fiber.Error{
+			Code:    fiber.StatusUnauthorized,
+			Message: "Unauthorized: invalid token claims",
+		}
+	}
+	id, ok := claims["id"].(float64)
+	if !ok {
+		return 0, &fiber.Error{
+			Code:    fiber.StatusUnauthorized,
+			Message: "Unauthorized: invalid user ID",
+		}
+	}
+	return uint(id), nil
+}
 
 func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 	var req models.Admins
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: err.Error(),
-		}
-	}
-
-	if len(req.Password) <= 5 || len(req.Password) >= 12 {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must be between 5 and 12 characters",
 		}
 	}
 
 	if !isValidEmail(req.Email) {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: "Invalid email format",
 		}
 	}
 
-	hashletter := regexp.MustCompile(`[A-Za-z]`).MatchString(req.Password)
-	hashdigits := regexp.MustCompile(`\d`).MatchString(req.Password)
-	hashSpecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(req.Password)
-
-	if !hashletter || !hashdigits || !hashSpecial {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must contain at least one letter, one number, and one special character",
-		}
+	if err := validatePassword(req.Password); err != nil {
+		return err
 	}
 
-	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	encoded, err := hashPassword(req.Password)
 	if err != nil {
-		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return err
 	}
+
 	admin := models.Admins{
-		Name:     req.Name,
-		Username: req.Username,
-		Email:    req.Email,
-		Password: string(encode),
+		Name:      req.Name,
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  encoded,
 		CreatedAt: time.Now(),
 	}
 
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&admin).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
+	if err := a.db.Create(&admin).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
@@ -109,12 +129,11 @@ func (a *AdminController) RegisterAdmin(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Admin created successfully",
-		Data: response,
+		Data:    response,
 	})
 }
-
 
 func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 	var req models.AdminsRequest
@@ -134,24 +153,15 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 
 	if !isValidEmail(req.Email) {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: "Invalid email format",
 		}
 	}
 
-
 	var admin models.Admins
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ?", req.Email).First(&admin)
-		if result.Error != nil {
-			return result.Error
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := a.db.Where("email = ?", req.Email).First(&admin).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -199,32 +209,16 @@ func (a *AdminController) LoginAdmin(c *fiber.Ctx) error {
 	})
 }
 
-
-
 func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
-	var response models.Admins
-	userID, ok := c.Locals("userID").(uint)
-	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
-			Code:  fiber.StatusUnauthorized,
-			Message: "User ID not found in context",
-		})
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", userID).First(&response)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	var response models.Admins
+	if err := a.db.Where("id = ?", userID).First(&response).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -242,13 +236,11 @@ func (a *AdminController) GetSessionProfileAdmin(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Profile fetched successfully",
-		Data: data,
+		Data:    data,
 	})
-	
 }
-
 
 func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 	var req map[string]interface{}
@@ -256,16 +248,16 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.ErrBadRequest.Code,
+			Code:    fiber.ErrBadRequest.Code,
 			Message: err.Error(),
 		}
 	}
 
 	allowfields := map[string]bool{
-		"name": true,
+		"name":     true,
 		"username": true,
 		"password": true,
-		"email": true,
+		"email":    true,
 	}
 
 	for key := range req {
@@ -275,22 +267,9 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 	}
 
 	var admin models.Admins
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).First(&admin)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	
-
-	if err != nil {
+	if err := a.db.Where("id = ?", id).First(&admin).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -303,65 +282,32 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 		admin.Username = username
 	}
 
-	if password, ok :=  req["password"].(string); ok && password != "" {
-		if len(password) <= 5 || len(password) >= 12 {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must be between 5 and 12 characters",
-			}
+	if password, ok := req["password"].(string); ok && password != "" {
+		if err := validatePassword(password); err != nil {
+			return err
 		}
-
-		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
-		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
-		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
-
-		if !hashletter || !hashnumber || !hashspecial {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must contain at least one letter, one number, and one special character",
-			}
-		}
-
-		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		encoded, err := hashPassword(password)
 		if err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
+			return err
 		}
-
-		admin.Password =  string(encode)
+		admin.Password = encoded
 	}
-
 
 	if email, ok := req["email"].(string); ok && email != "" {
 		if !isValidEmail(email) {
 			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
+				Code:    fiber.StatusBadRequest,
 				Message: "Invalid email format",
 			}
 		}
 		admin.Email = email
 	}
 
-	req["updated_at"] = time.Now()
-	
+	admin.UpdatedAt = time.Now()
 
-
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Save(&admin)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := a.db.Save(&admin).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
@@ -374,69 +320,54 @@ func (a *AdminController) UpdateAdmin(c *fiber.Ctx) error {
 		CreatedAt: admin.CreatedAt,
 	}
 
-	if updatedAt, ok := req["updated_at"].(time.Time); ok {
-		response.UpdatedAt = &updatedAt
+	if admin.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
+	} else {
+		response.UpdatedAt = &admin.UpdatedAt
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Admin updated successfully",
-		Data: response,
+		Data:    response,
 	})
-
 }
-
 
 func (a *AdminController) DeleteAdmin(c *fiber.Ctx) error {
 	userID := c.Params("id")
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		var totalAdmins int64
-		var admin models.Admins
-
-		if err := tx.Model(&models.Admins{}).Count(&totalAdmins).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		if totalAdmins <= 1 {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Cannot delete the last admin",
-			}
-		}
-
-		result := tx.Where("id = ?", userID).First(&admin)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-
-		if err := tx.Delete(&admin).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		return nil
-		
-	})
-
-	if err != nil {
+	var totalAdmins int64
+	if err := a.db.Model(&models.Admins{}).Count(&totalAdmins).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusInternalServerError,
+			Message: err.Error(),
+		}
+	}
+
+	if totalAdmins <= 1 {
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: "Cannot delete the last admin",
+		}
+	}
+
+	var admin models.Admins
+	if err := a.db.Where("id = ?", userID).First(&admin).Error; err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusNotFound,
+			Message: err.Error(),
+		}
+	}
+
+	if err := a.db.Delete(&admin).Error; err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Admin deleted successfully",
 	})
-
 }
