@@ -2,97 +2,71 @@ package controllers
 
 import (
 	"os"
-	"regexp"
-	"satriacbtserver/configs"
-	"satriacbtserver/models"
-	"satriacbtserver/res"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/Satria-CBT/satria-cbt-server/models"
+	"github.com/Satria-CBT/satria-cbt-server/res"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
+type TeacherController struct {
+	db *gorm.DB
+}
 
-type TeacherController struct {}
-
-func NewTeacherController() *TeacherController {
-	return &TeacherController{}
+func NewTeacherController(db *gorm.DB) *TeacherController {
+	return &TeacherController{db: db}
 }
 
 func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
 	var req models.Teachers
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: err.Error(),
-		}
-	}
-
-	if len(req.Password) <= 5 || len(req.Password) >= 12 {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must be between 5 and 12 characters",
 		}
 	}
 
 	if !isValidEmail(req.Email) {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: "Invalid email format",
 		}
 	}
 
-	hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(req.Password)
-	hashnumber := regexp.MustCompile(`\d`).MatchString(req.Password)
-	hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(req.Password)
-
-	if !hashletter || !hashnumber || !hashspecial {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must contain at least one letter, one number, and one special character",
-		}
+	if err := validatePassword(req.Password); err != nil {
+		return err
 	}
 
-	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	encoded, err := hashPassword(req.Password)
 	if err != nil {
-		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return err
 	}
-	teacher := models.Teachers {
-		Name: req.Name,
-		Username: req.Username,
-		Email: req.Email,
-		Password: string(encode),
-		Classes: req.Classes,
+
+	teacher := models.Teachers{
+		Name:      req.Name,
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  encoded,
+		Classes:   req.Classes,
 		CreatedAt: time.Now(),
 	}
 
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&teacher).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := t.db.Create(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
 
 	response := res.AdminResponse{
-		ID: teacher.ID,
-		Name: teacher.Name,
-		Username: teacher.Username,
-		Email: teacher.Email,
+		ID:        teacher.ID,
+		Name:      teacher.Name,
+		Username:  teacher.Username,
+		Email:     teacher.Email,
 		CreatedAt: teacher.CreatedAt,
 	}
 
@@ -101,46 +75,32 @@ func (t *TeacherController) RegisterTeacher(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Teacher registered successfully",
-		Data: response,
+		Data:    response,
 	})
-	
 }
-
 
 func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	var req models.TeachersRequest
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: err.Error(),
 		}
 	}
 
 	if !isValidEmail(req.Email) {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: "Invalid email format",
 		}
 	}
 
 	var teacher models.Teachers
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ?", req.Email).First(&teacher)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: result.Error.Error(),
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
+	if err := t.db.Where("email = ?", req.Email).First(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -155,7 +115,7 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":    teacher.ID,
 		"email": teacher.Email,
-		"role" : "teacher",
+		"role":  "teacher",
 		"exp":   time.Now().Add(24 * time.Hour).Unix(),
 	})
 
@@ -169,12 +129,12 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	}
 
 	response := res.TeacherLoginResponse{
-		ID: teacher.ID,
-		Name: teacher.Name,
-		Username: teacher.Username,
-		Email: teacher.Email,
+		ID:        teacher.ID,
+		Name:      teacher.Name,
+		Username:  teacher.Username,
+		Email:     teacher.Email,
 		CreatedAt: teacher.CreatedAt,
-		Token: tokenString,
+		Token:     tokenString,
 	}
 
 	if teacher.UpdatedAt.IsZero() {
@@ -182,43 +142,28 @@ func (t *TeacherController) LoginTeacher(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Teacher logged in successfully",
-		Data: response,
+		Data:    response,
 	})
 }
 
-
 func (t *TeacherController) GetSessionProfileTeacher(c *fiber.Ctx) error {
-	var response models.Teachers
-	userID, ok := c.Locals("userID").(uint)
-	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
-			Code:  fiber.StatusUnauthorized,
-			Message: "User ID not found in context",
-		})
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", userID).First(&response)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	var teacher models.Teachers
+	if err := t.db.Where("id = ?", userID).Preload("Classes").First(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
 
-	classSummaries := make([]res.ClassSummaryResponse, len(response.Classes))
-	for i, class := range response.Classes {
+	classSummaries := make([]res.ClassSummaryResponse, len(teacher.Classes))
+	for i, class := range teacher.Classes {
 		classSummaries[i] = res.ClassSummaryResponse{
 			ID:   class.ID,
 			Name: class.Name,
@@ -227,26 +172,24 @@ func (t *TeacherController) GetSessionProfileTeacher(c *fiber.Ctx) error {
 	}
 
 	data := res.TeacherResponse{
-		ID:        response.ID,
-		Name:      response.Name,
-		Username:  response.Username,
-		Email:     response.Email,
-		CreatedAt: response.CreatedAt,
+		ID:        teacher.ID,
+		Name:      teacher.Name,
+		Username:  teacher.Username,
+		Email:     teacher.Email,
+		CreatedAt: teacher.CreatedAt,
 		Classes:   classSummaries,
 	}
 
-	if response.UpdatedAt.IsZero() {
+	if teacher.UpdatedAt.IsZero() {
 		data.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Profile fetched successfully",
-		Data: data,
+		Data:    data,
 	})
-	
 }
-
 
 func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 	var req map[string]interface{}
@@ -254,18 +197,17 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.ErrBadRequest.Code,
+			Code:    fiber.ErrBadRequest.Code,
 			Message: err.Error(),
 		}
 	}
 
 	allowfields := map[string]bool{
-		"name": true,
+		"name":     true,
 		"username": true,
 		"password": true,
-		"email": true,
-		"classes": true,
-		"createdClasses": true,
+		"email":    true,
+		"classes":  true,
 	}
 
 	for key := range req {
@@ -275,21 +217,9 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 	}
 
 	var teacher models.Teachers
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).First(&teacher)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
+	if err := t.db.Where("id = ?", id).First(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -302,40 +232,21 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 		teacher.Username = username
 	}
 
-	if password, ok :=  req["password"].(string); ok && password != "" {
-		if len(password) <= 5 || len(password) >= 12 {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must be between 5 and 12 characters",
-			}
+	if password, ok := req["password"].(string); ok && password != "" {
+		if err := validatePassword(password); err != nil {
+			return err
 		}
-		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
-		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
-		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
-
-		if !hashletter || !hashnumber || !hashspecial {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must contain at least one letter, one number, and one special character",
-			}
-		}
-
-		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		encoded, err := hashPassword(password)
 		if err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
+			return err
 		}
-		 
-		teacher.Password =  string(encode)
+		teacher.Password = encoded
 	}
-
 
 	if email, ok := req["email"].(string); ok && email != "" {
 		if !isValidEmail(email) {
 			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
+				Code:    fiber.StatusBadRequest,
 				Message: "Invalid email format",
 			}
 		}
@@ -354,22 +265,11 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 		teacher.Classes = parsedClasses
 	}
 
-	req["updated_at"] = time.Now()
+	teacher.UpdatedAt = time.Now()
 
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Save(&teacher)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := t.db.Save(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
@@ -397,48 +297,32 @@ func (t *TeacherController) UpdateTeacher(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Teacher updated successfully",
-		Data: response,
+		Data:    response,
 	})
-
 }
-
 
 func (t *TeacherController) DeleteTeacher(c *fiber.Ctx) error {
 	userID := c.Params("id")
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		var teacher models.Teachers
 
-		result := tx.Where("id = ?", userID).First(&teacher)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-
-		if err := tx.Delete(&teacher).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		return nil
-		
-	})
-
-	if err != nil {
+	var teacher models.Teachers
+	if err := t.db.Where("id = ?", userID).First(&teacher).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusNotFound,
+			Message: err.Error(),
+		}
+	}
+
+	if err := t.db.Delete(&teacher).Error; err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Teacher deleted successfully",
 	})
-
 }

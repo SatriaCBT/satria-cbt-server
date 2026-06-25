@@ -2,88 +2,62 @@ package controllers
 
 import (
 	"os"
-	"regexp"
-	"satriacbtserver/configs"
-	"satriacbtserver/models"
-	"satriacbtserver/res"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/Satria-CBT/satria-cbt-server/models"
+	"github.com/Satria-CBT/satria-cbt-server/res"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-type StudentController struct {}
-
-func NewStudentController() *StudentController {
-	return &StudentController{}
+type StudentController struct {
+	db *gorm.DB
 }
 
+func NewStudentController(db *gorm.DB) *StudentController {
+	return &StudentController{db: db}
+}
 
 func (s *StudentController) RegisterStudent(c *fiber.Ctx) error {
 	var req models.Students
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: err.Error(),
-		}
-	}
-
-	if len(req.Password) <= 5 || len(req.Password) >= 12 {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must be between 5 and 12 characters",
 		}
 	}
 
 	if !isValidEmail(req.Email) {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: "Invalid email format",
 		}
 	}
 
-	hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(req.Password)
-	hashnumber := regexp.MustCompile(`\d`).MatchString(req.Password)
-	hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(req.Password)
-
-	if !hashletter || !hashnumber || !hashspecial {
-		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
-			Message: "Password must contain at least one letter, one number, and one special character",
-		}
+	if err := validatePassword(req.Password); err != nil {
+		return err
 	}
 
-	encode, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	encoded, err := hashPassword(req.Password)
 	if err != nil {
-		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return err
 	}
+
 	student := models.Students{
-		Name: req.Name,
-		Username: req.Username,
-		Email: req.Email,
-		Password: string(encode),
-		Classes: req.Classes,
+		Name:      req.Name,
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  encoded,
+		Classes:   req.Classes,
 		CreatedAt: time.Now(),
 	}
 
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&student).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := s.db.Create(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
@@ -111,39 +85,25 @@ func (s *StudentController) RegisterStudent(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Student registered successfully",
-		Data: response,
+		Data:    response,
 	})
-	
 }
-
 
 func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 	var req models.StudentsRequest
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusBadRequest,
 			Message: err.Error(),
 		}
 	}
 
-
 	var student models.Students
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("email = ?", req.Email).Preload("Classes").First(&student)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := s.db.Where("email = ?", req.Email).Preload("Classes").First(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -186,53 +146,37 @@ func (s *StudentController) LoginStudent(c *fiber.Ctx) error {
 		Username:  student.Username,
 		Email:     student.Email,
 		CreatedAt: student.CreatedAt,
-		Classes:   classSummaries, 
+		Classes:   classSummaries,
 		Token:     tokenString,
 	}
-
 
 	if student.UpdatedAt.IsZero() {
 		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Student logged in successfully",
-		Data: response,
+		Data:    response,
 	})
 }
 
-
 func (s *StudentController) GetSessionProfileStudent(c *fiber.Ctx) error {
-	var response models.Students
-	userID, ok := c.Locals("userID").(uint)
-	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(res.ResponseCode{
-			Code:  fiber.StatusUnauthorized,
-			Message: "User ID not found in context",
-		})
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
 	}
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", userID).First(&response)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	var student models.Students
+	if err := s.db.Where("id = ?", userID).Preload("Classes").First(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
 
-	classSummaries := make([]res.ClassSummaryResponse, len(response.Classes))
-	for i, class := range response.Classes {
+	classSummaries := make([]res.ClassSummaryResponse, len(student.Classes))
+	for i, class := range student.Classes {
 		classSummaries[i] = res.ClassSummaryResponse{
 			ID:   class.ID,
 			Name: class.Name,
@@ -241,27 +185,24 @@ func (s *StudentController) GetSessionProfileStudent(c *fiber.Ctx) error {
 	}
 
 	data := res.StudentResponse{
-		ID:        response.ID,
-		Name:      response.Name,
-		Username:  response.Username,
-		Email:     response.Email,
-		CreatedAt: response.CreatedAt,
+		ID:        student.ID,
+		Name:      student.Name,
+		Username:  student.Username,
+		Email:     student.Email,
+		CreatedAt: student.CreatedAt,
 		Classes:   classSummaries,
 	}
 
-
-	if response.UpdatedAt.IsZero() {
+	if student.UpdatedAt.IsZero() {
 		data.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Profile fetched successfully",
-		Data: data,
+		Data:    data,
 	})
-	
 }
-
 
 func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 	var req map[string]interface{}
@@ -269,17 +210,17 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 
 	if err := c.BodyParser(&req); err != nil {
 		return &fiber.Error{
-			Code: fiber.ErrBadRequest.Code,
+			Code:    fiber.ErrBadRequest.Code,
 			Message: err.Error(),
 		}
 	}
 
 	allowfields := map[string]bool{
-		"name": true,
+		"name":     true,
 		"username": true,
 		"password": true,
-		"email": true,
-		"classes": true,
+		"email":    true,
+		"classes":  true,
 	}
 
 	for key := range req {
@@ -289,20 +230,9 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 	}
 
 	var student models.Students
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).First(&student)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
+	if err := s.db.Where("id = ?", id).First(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusNotFound,
+			Code:    fiber.StatusNotFound,
 			Message: err.Error(),
 		}
 	}
@@ -315,40 +245,21 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 		student.Username = username
 	}
 
-	if password, ok :=  req["password"].(string); ok && password != "" {
-		if len(password) <= 5 || len(password) >= 12 {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must be between 5 and 12 characters",
-			}
+	if password, ok := req["password"].(string); ok && password != "" {
+		if err := validatePassword(password); err != nil {
+			return err
 		}
-
-		hashletter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
-		hashnumber := regexp.MustCompile(`\d`).MatchString(password)
-		hashspecial := regexp.MustCompile(`[!@#$%^&*(),.?":{}|<>]`).MatchString(password)
-
-		if !hashletter || !hashnumber || !hashspecial {
-			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
-				Message: "Password must contain at least one letter, one number, and one special character",
-			}
-		}
-
-		encode, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		encoded, err := hashPassword(password)
 		if err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
+			return err
 		}
-		student.Password = string(encode)
+		student.Password = encoded
 	}
-
 
 	if email, ok := req["email"].(string); ok && email != "" {
 		if !isValidEmail(email) {
 			return &fiber.Error{
-				Code: fiber.StatusBadRequest,
+				Code:    fiber.StatusBadRequest,
 				Message: "Invalid email format",
 			}
 		}
@@ -367,24 +278,11 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 		student.Classes = parsedClasses
 	}
 
-	req["updated_at"] = time.Now()
+	student.UpdatedAt = time.Now()
 
-
-	err = configs.Database().Transaction(func(tx *gorm.DB) error {
-		result := tx.Save(&student)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: result.Error.Error(),
-			}
-		}
-		return nil
-	})
-
-
-	if err != nil {
+	if err := s.db.Save(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusInternalServerError,
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
@@ -407,54 +305,37 @@ func (s *StudentController) UpdateStudent(c *fiber.Ctx) error {
 		Classes:   classSummaries,
 	}
 
-	if updatedAt, ok := req["updated_at"].(time.Time); ok {
-		response.UpdatedAt = &updatedAt
+	if student.UpdatedAt.IsZero() {
+		response.UpdatedAt = nil
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Student updated successfully",
-		Data: response,
+		Data:    response,
 	})
-
 }
-
 
 func (s *StudentController) DeleteStudent(c *fiber.Ctx) error {
 	userID := c.Params("id")
 
-	err := configs.Database().Transaction(func(tx *gorm.DB) error {
-		var student models.Students
-
-		result := tx.Where("id = ?", userID).First(&student)
-		if result.Error != nil {
-			return &fiber.Error{
-				Code: fiber.StatusNotFound,
-				Message: result.Error.Error(),
-			}
-		}
-
-		if err := tx.Delete(&student).Error; err != nil {
-			return &fiber.Error{
-				Code: fiber.StatusInternalServerError,
-				Message: err.Error(),
-			}
-		}
-
-		return nil
-		
-	})
-
-	if err != nil {
+	var student models.Students
+	if err := s.db.Where("id = ?", userID).First(&student).Error; err != nil {
 		return &fiber.Error{
-			Code: fiber.StatusBadRequest,
+			Code:    fiber.StatusNotFound,
+			Message: err.Error(),
+		}
+	}
+
+	if err := s.db.Delete(&student).Error; err != nil {
+		return &fiber.Error{
+			Code:    fiber.StatusInternalServerError,
 			Message: err.Error(),
 		}
 	}
 
 	return c.JSON(res.ResponseCode{
-		Code: fiber.StatusOK,
+		Code:    fiber.StatusOK,
 		Message: "Student deleted successfully",
 	})
-
 }
