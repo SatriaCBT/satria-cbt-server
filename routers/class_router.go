@@ -2,8 +2,8 @@ package routers
 
 
 import (
-	"satriacbtserver/controllers"
-	"satriacbtserver/middleware"
+	"github.com/Satria-CBT/satria-cbt-server/controllers"
+	"github.com/Satria-CBT/satria-cbt-server/middleware"
 
 	"github.com/gofiber/fiber/v2"
 )
