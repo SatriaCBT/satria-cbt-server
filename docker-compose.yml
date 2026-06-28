@@ -14,18 +14,64 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - cbt-net
 
-  app:
-    build: .
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
     ports:
       - "3000:3000"
     env_file:
       - .env
     environment:
+      AUTH_SERVICE_URL: http://auth:3001
+      EXAM_SERVICE_URL: http://exam:3002
       DB_HOST: db
     depends_on:
       db:
         condition: service_healthy
+      auth:
+        condition: service_started
+      exam:
+        condition: service_started
+    networks:
+      - cbt-net
+
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    env_file:
+      - .env
+    environment:
+      AUTH_SERVICE_PORT: "3001"
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - cbt-net
+
+  exam:
+    build:
+      context: .
+      dockerfile: Dockerfile.exam
+    env_file:
+      - .env
+    environment:
+      EXAM_PORT: "3002"
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - cbt-net
 
 volumes:
   pgdata:
+
+networks:
+  cbt-net:
+    driver: bridge
