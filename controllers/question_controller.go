@@ -151,6 +151,9 @@ func (q *QuestionController) Update(c *fiber.Ctx) error {
 	if req.SubjectID > 0 {
 		question.SubjectID = req.SubjectID
 	}
+	if req.Explanation != "" {
+		question.Explanation = req.Explanation
+	}
 
 	if err := q.db.Save(&question).Error; err != nil {
 		return &fiber.Error{Code: fiber.StatusInternalServerError, Message: err.Error()}
@@ -212,6 +215,7 @@ func toQuestionResponseWithAnswer(q models.Question) res.QuestionResponseWithAns
 		Options:       q.Options,
 		CorrectAnswer: q.CorrectAnswer,
 		Points:        q.Points,
+		Explanation:   q.Explanation,
 		CreatedByID:   q.CreatedByID,
 		CreatedAt:     q.CreatedAt,
 		UpdatedAt:     q.UpdatedAt,

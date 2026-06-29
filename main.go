@@ -60,6 +60,8 @@ func main() {
 	questionController := controllers.NewQuestionController(database)
 	examController := controllers.NewExamController(database)
 	attemptController := controllers.NewExamAttemptController(database)
+	dashboardController := controllers.NewDashboardController(database)
+	exportController := controllers.NewExportController(database)
 
 	routers.NewRoutesClass(app, classController)
 	routers.NewRoutesAdmins(app, adminController)
@@ -69,6 +71,9 @@ func main() {
 	routers.NewRoutesQuestion(app, questionController)
 	routers.NewRoutesExam(app, examController)
 	routers.NewRoutesExamAttempt(app, attemptController)
+	routers.NewRoutesDashboard(app, dashboardController)
+	routers.NewRoutesExport(app, exportController)
+	controllers.InitWSRoutes(app, database)
 
 	app.Get("/swagger/*", swagger.HandlerDefault)
 

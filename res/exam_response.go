@@ -30,6 +30,7 @@ type QuestionResponseWithAnswer struct {
 	Options       string    `json:"options,omitempty"`
 	CorrectAnswer string    `json:"correctAnswer"`
 	Points        int       `json:"points"`
+	Explanation   string    `json:"explanation,omitempty"`
 	CreatedByID   uint      `json:"createdById"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -90,4 +91,55 @@ type ExamAnswerResponse struct {
 type ExamAnswerWithQuestionResponse struct {
 	ExamAnswerResponse
 	Question QuestionResponse `json:"question"`
+}
+
+type DashboardStatsResponse struct {
+	TotalExams      int64 `json:"totalExams"`
+	TotalSubjects   int64 `json:"totalSubjects"`
+	TotalStudents   int64 `json:"totalStudents"`
+	TotalTeachers   int64 `json:"totalTeachers"`
+	TotalAttempts   int64 `json:"totalAttempts"`
+	OngoingAttempts int64 `json:"ongoingAttempts"`
+}
+
+type ExamStatResponse struct {
+	ExamID        uint    `json:"examId"`
+	ExamTitle     string  `json:"examTitle"`
+	TotalAttempts int     `json:"totalAttempts"`
+	AverageScore  float64 `json:"averageScore"`
+	HighestScore  int     `json:"highestScore"`
+	LowestScore   int     `json:"lowestScore"`
+	PassCount     int     `json:"passCount"`
+	FailCount     int     `json:"failCount"`
+	PassRate      float64 `json:"passRate"`
+}
+
+type StudentPerformanceResponse struct {
+	StudentID    uint   `json:"studentId"`
+	StudentName  string `json:"studentName"`
+	TotalExams   int    `json:"totalExams"`
+	AverageScore float64 `json:"averageScore"`
+	HighestScore int    `json:"highestScore"`
+	LowestScore  int    `json:"lowestScore"`
+	TotalPass    int    `json:"totalPass"`
+	TotalFail    int    `json:"totalFail"`
+}
+
+type ClassPerformanceResponse struct {
+	ClassID      uint    `json:"classId"`
+	ClassName    string  `json:"className"`
+	TotalStudents int    `json:"totalStudents"`
+	TotalAttempts int    `json:"totalAttempts"`
+	AverageScore float64 `json:"averageScore"`
+	PassCount    int     `json:"passCount"`
+	FailCount    int     `json:"failCount"`
+}
+
+type RecentAttemptResponse struct {
+	AttemptID    uint      `json:"attemptId"`
+	ExamTitle    string    `json:"examTitle"`
+	StudentName  string    `json:"studentName"`
+	Score        *int      `json:"score,omitempty"`
+	Status       string    `json:"status"`
+	SubmittedAt  *time.Time `json:"submittedAt,omitempty"`
 }

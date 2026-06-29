@@ -75,6 +75,8 @@ func (e *ExamAttemptController) Start(c *fiber.Ctx) error {
 		})
 	}
 
+	go BroadcastAttemptEvent(attempt.ID, exam.ID, studentID, "Student", "started", nil)
+
 	return c.Status(fiber.StatusCreated).JSON(res.ResponseCode{
 		Code:    fiber.StatusCreated,
 		Message: "Exam started successfully",
@@ -161,6 +163,10 @@ func (e *ExamAttemptController) Submit(c *fiber.Ctx) error {
 	if err := e.db.Save(&attempt).Error; err != nil {
 		return &fiber.Error{Code: fiber.StatusInternalServerError, Message: err.Error()}
 	}
+
+	var student models.Students
+	e.db.First(&student, studentID)
+	go BroadcastAttemptEvent(attempt.ID, attempt.ExamID, studentID, student.Name, "submitted", &score)
 
 	return c.JSON(res.ResponseCode{
 		Code:    fiber.StatusOK,
@@ -255,6 +261,232 @@ func (e *ExamAttemptController) GetMyAttempts(c *fiber.Ctx) error {
 		Code:    fiber.StatusOK,
 		Message: "My attempts retrieved successfully",
 		Data:    response,
+	})
+}
+
+func (e *ExamAttemptController) SaveProgress(c *fiber.Ctx) error {
+	attemptID := c.Params("attemptId")
+	studentID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	var req struct {
+		Answers []struct {
+			QuestionID uint   `json:"questionId"`
+			Answer     string `json:"answer"`
+		} `json:"answers"`
+		CurrentQuestionIdx int `json:"currentQuestionIdx"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return &fiber.Error{Code: fiber.StatusBadRequest, Message: err.Error()}
+	}
+
+	var attempt models.ExamAttempt
+	if err := e.db.First(&attempt, attemptID).Error; err != nil {
+		return &fiber.Error{Code: fiber.StatusNotFound, Message: "Attempt not found"}
+	}
+	if attempt.StudentID != studentID {
+		return &fiber.Error{Code: fiber.StatusForbidden, Message: "Unauthorized"}
+	}
+
+	for _, answer := range req.Answers {
+		e.db.Model(&models.ExamAnswer{}).
+			Where("attempt_id = ? AND question_id = ?", attemptID, answer.QuestionID).
+			Update("answer", answer.Answer)
+	}
+
+	e.db.Model(&attempt).Update("current_question_idx", req.CurrentQuestionIdx)
+
+	return c.JSON(res.ResponseCode{
+		Code:    fiber.StatusOK,
+		Message: "Progress saved successfully",
+	})
+}
+
+func (e *ExamAttemptController) Resume(c *fiber.Ctx) error {
+	attemptID := c.Params("attemptId")
+	studentID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	var attempt models.ExamAttempt
+	if err := e.db.Preload("Exam.Subject").Preload("Answers").First(&attempt, attemptID).Error; err != nil {
+		return &fiber.Error{Code: fiber.StatusNotFound, Message: "Attempt not found"}
+	}
+	if attempt.StudentID != studentID {
+		return &fiber.Error{Code: fiber.StatusForbidden, Message: "Unauthorized"}
+	}
+	if attempt.Status != models.AttemptInProgress {
+		return &fiber.Error{Code: fiber.StatusBadRequest, Message: "Attempt is not in progress"}
+	}
+
+	var questionIDs []uint
+	for _, ans := range attempt.Answers {
+		questionIDs = append(questionIDs, ans.QuestionID)
+	}
+
+	var questions []models.Question
+	e.db.Where("id IN ?", questionIDs).Find(&questions)
+
+	questionMap := make(map[uint]models.Question)
+	for _, q := range questions {
+		questionMap[q.ID] = q
+	}
+
+	answers := make([]res.ExamAnswerWithQuestionResponse, len(attempt.Answers))
+	for i, ans := range attempt.Answers {
+		q := questionMap[ans.QuestionID]
+		answers[i] = res.ExamAnswerWithQuestionResponse{
+			ExamAnswerResponse: res.ExamAnswerResponse{
+				ID:         ans.ID,
+				AttemptID:  ans.AttemptID,
+				QuestionID: ans.QuestionID,
+				Answer:     ans.Answer,
+				Points:     ans.Points,
+			},
+			Question: res.QuestionResponse{
+				ID:        q.ID,
+				SubjectID: q.SubjectID,
+				Type:      string(q.Type),
+				Question:  q.Question,
+				Options:   q.Options,
+				Points:    q.Points,
+			},
+		}
+	}
+
+	resp := toAttemptResponse(attempt)
+	resp.Answers = nil
+
+	return c.JSON(res.ResponseCode{
+		Code:    fiber.StatusOK,
+		Message: "Attempt resumed successfully",
+		Data: fiber.Map{
+			"attempt":            resp,
+			"answers":            answers,
+			"currentQuestionIdx": attempt.CurrentQuestionIdx,
+		},
+	})
+}
+
+func (e *ExamAttemptController) Review(c *fiber.Ctx) error {
+	attemptID := c.Params("attemptId")
+	userID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	claims := c.Locals("userID").(jwt.MapClaims)
+	role := claims["role"].(string)
+
+	var attempt models.ExamAttempt
+	if err := e.db.Preload("Exam.Subject").Preload("Answers").First(&attempt, attemptID).Error; err != nil {
+		return &fiber.Error{Code: fiber.StatusNotFound, Message: "Attempt not found"}
+	}
+
+	if role == "student" && attempt.StudentID != userID {
+		return &fiber.Error{Code: fiber.StatusForbidden, Message: "Unauthorized"}
+	}
+
+	if attempt.Status == models.AttemptInProgress {
+		return &fiber.Error{Code: fiber.StatusBadRequest, Message: "Attempt is still in progress"}
+	}
+
+	if role == "student" && !attempt.Exam.ShowResult {
+		return &fiber.Error{Code: fiber.StatusForbidden, Message: "Result is not available for this exam"}
+	}
+
+	var questionIDs []uint
+	for _, ans := range attempt.Answers {
+		questionIDs = append(questionIDs, ans.QuestionID)
+	}
+
+	var questions []models.Question
+	e.db.Where("id IN ?", questionIDs).Find(&questions)
+
+	questionMap := make(map[uint]models.Question)
+	for _, q := range questions {
+		questionMap[q.ID] = q
+	}
+
+	answers := make([]res.ExamAnswerWithQuestionResponse, len(attempt.Answers))
+	for i, ans := range attempt.Answers {
+		q := questionMap[ans.QuestionID]
+		answerResp := res.ExamAnswerWithQuestionResponse{
+			ExamAnswerResponse: res.ExamAnswerResponse{
+				ID:         ans.ID,
+				AttemptID:  ans.AttemptID,
+				QuestionID: ans.QuestionID,
+				Answer:     ans.Answer,
+				Points:     ans.Points,
+				IsCorrect:  ans.IsCorrect,
+			},
+			Question: res.QuestionResponse{
+				ID:        q.ID,
+				SubjectID: q.SubjectID,
+				Type:      string(q.Type),
+				Question:  q.Question,
+				Options:   q.Options,
+				Points:    q.Points,
+			},
+		}
+
+		if role == "teacher" || role == "admin" || attempt.Exam.ShowResult {
+			answerResp.Question = res.QuestionResponse{
+				ID:        q.ID,
+				SubjectID: q.SubjectID,
+				Type:      string(q.Type),
+				Question:  q.Question,
+				Options:   q.Options,
+				Points:    q.Points,
+			}
+		}
+
+		answers[i] = answerResp
+	}
+
+	resp := toAttemptResponse(attempt)
+
+	return c.JSON(res.ResponseCode{
+		Code:    fiber.StatusOK,
+		Message: "Review retrieved successfully",
+		Data: fiber.Map{
+			"attempt":   resp,
+			"answers":   answers,
+			"showResult": attempt.Exam.ShowResult,
+		},
+	})
+}
+
+func (e *ExamAttemptController) LogTabSwitch(c *fiber.Ctx) error {
+	attemptID := c.Params("attemptId")
+	studentID, err := getUserID(c)
+	if err != nil {
+		return err
+	}
+
+	var attempt models.ExamAttempt
+	if err := e.db.First(&attempt, attemptID).Error; err != nil {
+		return &fiber.Error{Code: fiber.StatusNotFound, Message: "Attempt not found"}
+	}
+	if attempt.StudentID != studentID {
+		return &fiber.Error{Code: fiber.StatusForbidden, Message: "Unauthorized"}
+	}
+
+	e.db.Model(&attempt).UpdateColumn("tab_switch_count", gorm.Expr("tab_switch_count + 1"))
+
+	if attempt.TabSwitchCount+1 >= 5 && !attempt.Suspicious {
+		e.db.Model(&attempt).Updates(map[string]interface{}{
+			"suspicious":        true,
+			"suspicious_reason": "Excessive tab switching detected",
+		})
+	}
+
+	return c.JSON(res.ResponseCode{
+		Code:    fiber.StatusOK,
+		Message: "Tab switch logged",
 	})
 }
 
