@@ -29,3 +29,6 @@ tmp/
 
 # Time travel script (local use only)
 time-travel.sh
+
+# IDE
+.idea/
